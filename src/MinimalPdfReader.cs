@@ -525,12 +525,13 @@ public class ChromeTabs : TabControl
         // control in this file sets it; this one had been missed.
         SetStyle(ControlStyles.UserPaint | ControlStyles.OptimizedDoubleBuffer |
                  ControlStyles.AllPaintingInWmPaint | ControlStyles.ResizeRedraw, true);
-        // Fixed sizing, not auto-width: TabSizeMode.Normal combined with Multiline (needed for
-        // overflow once several tabs are open) has a known WinForms bug where the tab row's
-        // height can compute to zero, making the whole strip disappear. Fixed is reliable.
+        // Fixed sizing, not auto-width — TabSizeMode.Normal made the strip unreliable.
         ItemSize = new Size(TAB_W, TAB_H);
         SizeMode = TabSizeMode.Fixed;
-        Multiline = true; // wrap to another row instead of clipping tabs off-screen when many are open
+        // Multiline deliberately NOT set here: TabControl.Multiline's row-height calculation
+        // has a known WinForms timing bug where it can resolve to zero rows — making the whole
+        // strip disappear — when set before the control has a parent/window handle, which is
+        // exactly what setting it in this constructor does. That's what broke the strip twice.
         Font = T.UiBig;
     }
 
