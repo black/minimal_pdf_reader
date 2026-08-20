@@ -968,6 +968,8 @@ public class MinimalPdfReader : Form
         _btnOpen  = new FlatBtn("Open", 92, 30) { Icon = Ico.Folder };
         _btnTheme = new FlatBtn("Dark", 88, 30) { Icon = (g, r, c) => { if (T.Dark) Ico.Moon(g, r, c); else Ico.Sun(g, r, c); } };
         _btnTheme.Toggled = T.Dark;
+        FitButton(_btnOpen);
+        FitButton(_btnTheme);
         _tips.SetToolTip(_btnOpen,  "Open PDF (Ctrl+O)");
         _tips.SetToolTip(_btnTheme, "Toggle dark / light theme");
 
@@ -993,6 +995,16 @@ public class MinimalPdfReader : Form
 
         _tabs.BringToFront();
         UpdateToolbarEnabled();
+    }
+
+    // Icon+label buttons must be measured, not guessed — a fixed pixel width truncates
+    // as soon as the font renders wider than expected (DPI scaling, "Light" vs "Dark", etc).
+    void FitButton(FlatBtn b)
+    {
+        if (string.IsNullOrEmpty(b.Text)) return;
+        int textW = TextRenderer.MeasureText(b.Text, b.Font, new Size(int.MaxValue, b.Height), TextFormatFlags.SingleLine).Width;
+        int iconZone = (b.Icon != null) ? 8 + 22 : 8;
+        b.Width = iconZone + textW + 14;
     }
 
     void LayoutTitleBar(int titleH, int capW)
@@ -1100,6 +1112,8 @@ public class MinimalPdfReader : Form
         T.Dark = !T.Dark;
         _btnTheme.Toggled = T.Dark;
         _btnTheme.Text = T.Dark ? "Dark" : "Light";
+        FitButton(_btnTheme);
+        LayoutTitleBar(_titleBar.Height, _btnClose.Width);
         ApplyTheme();
     }
 
