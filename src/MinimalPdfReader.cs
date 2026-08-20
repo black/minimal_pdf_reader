@@ -620,6 +620,17 @@ public class ChromeTabs : TabControl
     }
 
     public void ApplyTheme() { Font = T.UiFont; Invalidate(); }
+
+    // Forces the native tab control to genuinely redo its item-size/layout, not just repaint.
+    // Re-set through Size.Empty first so the property setter can't short-circuit as a no-op.
+    public void ForceRelayout()
+    {
+        Size sz = ItemSize;
+        ItemSize = Size.Empty;
+        ItemSize = sz;
+        PerformLayout();
+        Invalidate();
+    }
 }
 
 // ════════════════════════════════════════════════════════════════════════════════
@@ -963,6 +974,7 @@ public class MinimalPdfReader : Form
 
         BuildUI();
         WireEvents();
+        Shown += (s, e) => _tabs.ForceRelayout();
     }
 
     // A borderless form loses the native drop shadow — CS_DROPSHADOW restores it.
@@ -1047,6 +1059,15 @@ public class MinimalPdfReader : Form
     // ── UI construction ──────────────────────────────────────────────────────
     void BuildUI()
     {
+        // _titleBar and _shell are now separate Form-level siblings (Top / Fill) — before,
+        // there was only one Form-level child so this never mattered. Without suspending
+        // layout, each Controls.Add below can trigger an intermediate layout pass where _tabs
+        // computes its internal tab-strip height against not-yet-correct parent bounds, and
+        // that wrong (sometimes zero) strip height can stick even though everything looks
+        // right once construction settles — Invalidate() only asks for a repaint, not a
+        // re-layout, so it can't fix a bad size that was already baked in.
+        SuspendLayout();
+
         // Outer margin frame: header-tier background showing around a lighter, rounded
         // content card (toolbar/tabs/canvas/status bar) — matches the design file's
         // two-layer structure (dark chrome frame + inset rounded content panel).
@@ -1169,6 +1190,7 @@ public class MinimalPdfReader : Form
         _tabs.Resize += (s, e) => LayoutZoomPill();
         LayoutZoomPill();
 
+        ResumeLayout(true); // true = perform a real layout pass now, with everything in place
         UpdateToolbarEnabled();
     }
 
