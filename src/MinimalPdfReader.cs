@@ -525,14 +525,21 @@ public class ChromeTabs : TabControl
         // control in this file sets it; this one had been missed.
         SetStyle(ControlStyles.UserPaint | ControlStyles.OptimizedDoubleBuffer |
                  ControlStyles.AllPaintingInWmPaint | ControlStyles.ResizeRedraw, true);
-        // Fixed sizing, not auto-width — TabSizeMode.Normal made the strip unreliable.
-        ItemSize = new Size(TAB_W, TAB_H);
-        SizeMode = TabSizeMode.Fixed;
-        // Multiline deliberately NOT set here: TabControl.Multiline's row-height calculation
-        // has a known WinForms timing bug where it can resolve to zero rows — making the whole
-        // strip disappear — when set before the control has a parent/window handle, which is
-        // exactly what setting it in this constructor does. That's what broke the strip twice.
         Font = T.UiBig;
+        // ItemSize/SizeMode deliberately NOT set here. TabControl is backed by a real native
+        // Win32 tab control that doesn't exist yet at construction time (no parent, no window
+        // handle) — properties like SizeMode/ItemSize/Multiline that depend on that native
+        // control can silently fail or resolve to a zero-height strip when set this early.
+        // Setting them in OnHandleCreated, once the native control genuinely exists, is the
+        // correct, robust place — not something to keep guessing about property by property.
+    }
+
+    protected override void OnHandleCreated(EventArgs e)
+    {
+        base.OnHandleCreated(e);
+        SizeMode = TabSizeMode.Fixed;
+        ItemSize = new Size(TAB_W, TAB_H);
+        Invalidate();
     }
 
     Rectangle XRect(Rectangle r) { return new Rectangle(r.Right - CLOSE - 12, r.Top + (r.Height - CLOSE) / 2, CLOSE, CLOSE); }
