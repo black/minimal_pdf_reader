@@ -515,16 +515,22 @@ public class ChromeTabs : TabControl
     int _xHov = -1, _tabHov = -1;
     const int CLOSE = 16;
 
+    const int TAB_H = 48, TAB_W = 220;
+
     public ChromeTabs()
     {
+        // ResizeRedraw matters here: without it, this owner-drawn control isn't guaranteed a
+        // full repaint when its internal layout changes (e.g. a tab being added), which can
+        // leave stale pixels from the previous paint on screen. Every other custom-painted
+        // control in this file sets it; this one had been missed.
         SetStyle(ControlStyles.UserPaint | ControlStyles.OptimizedDoubleBuffer |
-                 ControlStyles.AllPaintingInWmPaint, true);
-        SizeMode = TabSizeMode.Normal;      // auto-width per tab — flush notebook-tab look, not fixed pills
-        Padding = new Point(24, 8);         // per-tab horizontal/vertical padding (native TabControl API)
-        Multiline = true;                   // auto-width tabs have no scroll/overflow handling under full
-                                             // owner-draw — without this, tabs past the strip's edge become
-                                             // invisible and unclickable once several files are open. Wrapping
-                                             // to another row keeps every open tab reachable.
+                 ControlStyles.AllPaintingInWmPaint | ControlStyles.ResizeRedraw, true);
+        // Fixed sizing, not auto-width: TabSizeMode.Normal combined with Multiline (needed for
+        // overflow once several tabs are open) has a known WinForms bug where the tab row's
+        // height can compute to zero, making the whole strip disappear. Fixed is reliable.
+        ItemSize = new Size(TAB_W, TAB_H);
+        SizeMode = TabSizeMode.Fixed;
+        Multiline = true; // wrap to another row instead of clipping tabs off-screen when many are open
         Font = T.UiBig;
     }
 
@@ -1272,6 +1278,7 @@ public class MinimalPdfReader : Form
         page.Controls.Add(viewer);
         _tabs.TabPages.Add(page);
         _tabs.SelectedTab = page;
+        _tabs.Invalidate();
         BindActive();
         viewer.LoadFile(path);
         if (_tabs.TabPages.Contains(page)) viewer.Focus();
