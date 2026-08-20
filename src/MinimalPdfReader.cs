@@ -89,11 +89,10 @@ public static class T
     // below the title bar (toolbar, tabs, canvas, status bar) shares the Bar tone.
     public static Color Bg     { get { return Dark ? D(0x20, 0x20, 0x20) : D(255, 255, 255); } }
     public static Color Bar    { get { return Dark ? D(0x27, 0x27, 0x27) : D(247, 247, 247); } }
-    // Tabs are flush "notebook" tabs attached to the content card below them, exactly
-    // as in the design file: the strip shows the header tier where nothing covers it,
-    // and the active tab matches the content tier so it reads as merged with the page.
-    public static Color TabBg  { get { return Bg; } }
-    public static Color TabOn  { get { return Bar; } }
+    // The whole content card (toolbar, tab strip, canvas, status bar) is one uniform
+    // surface — tabs read as raised floating pills sitting on that surface.
+    public static Color TabBg  { get { return Bar; } }
+    public static Color TabOn  { get { return PillBg; } }
     public static Color TabOff { get { return Dark ? Color.FromArgb(16, 255, 255, 255) : Color.FromArgb(10, 0, 0, 0); } }
     public static Color TabHov { get { return Dark ? D(66, 66, 66)    : D(225, 225, 225); } }
     public static Color Canvas { get { return Bar; } }
@@ -513,36 +512,25 @@ public class DoubleBufferedPanel : Panel
 public class ChromeTabs : TabControl
 {
     int _xHov = -1, _tabHov = -1;
-    const int CLOSE = 16;
-
-    const int TAB_H = 48, TAB_W = 220;
+    const int TAB_H = 46, CLOSE = 16, TAB_W = 252, GAP = 8, TOP_INSET = 11;
 
     public ChromeTabs()
     {
-        // ResizeRedraw matters here: without it, this owner-drawn control isn't guaranteed a
-        // full repaint when its internal layout changes (e.g. a tab being added), which can
-        // leave stale pixels from the previous paint on screen. Every other custom-painted
-        // control in this file sets it; this one had been missed.
         SetStyle(ControlStyles.UserPaint | ControlStyles.OptimizedDoubleBuffer |
-                 ControlStyles.AllPaintingInWmPaint | ControlStyles.ResizeRedraw, true);
-        Font = T.UiBig;
-        // ItemSize/SizeMode deliberately NOT set here. TabControl is backed by a real native
-        // Win32 tab control that doesn't exist yet at construction time (no parent, no window
-        // handle) — properties like SizeMode/ItemSize/Multiline that depend on that native
-        // control can silently fail or resolve to a zero-height strip when set this early.
-        // Setting them in OnHandleCreated, once the native control genuinely exists, is the
-        // correct, robust place — not something to keep guessing about property by property.
-    }
-
-    protected override void OnHandleCreated(EventArgs e)
-    {
-        base.OnHandleCreated(e);
-        SizeMode = TabSizeMode.Fixed;
+                 ControlStyles.AllPaintingInWmPaint, true);
         ItemSize = new Size(TAB_W, TAB_H);
-        Invalidate();
+        SizeMode = TabSizeMode.Fixed;
+        Font = T.UiBig;
     }
 
-    Rectangle XRect(Rectangle r) { return new Rectangle(r.Right - CLOSE - 12, r.Top + (r.Height - CLOSE) / 2, CLOSE, CLOSE); }
+    // Visible (inset, floating) tab shape — leaves a gap on each side and headroom on top
+    Rectangle TabDrawRect(int i)
+    {
+        var full = GetTabRect(i);
+        return new Rectangle(full.X + GAP / 2, full.Y + TOP_INSET, full.Width - GAP, full.Height - TOP_INSET);
+    }
+
+    Rectangle XRect(Rectangle r) { return new Rectangle(r.Right - CLOSE - 8, r.Top + (r.Height - CLOSE) / 2, CLOSE, CLOSE); }
 
     protected override void OnPaint(PaintEventArgs e)
     {
@@ -552,17 +540,24 @@ public class ChromeTabs : TabControl
 
         for (int i = 0; i < TabCount; i++)
         {
-            var r = GetTabRect(i);
+            var r = TabDrawRect(i);
             bool sel  = (SelectedIndex == i);
             bool hov  = (_tabHov == i);
             bool xhov = (_xHov == i);
 
             Color bg = sel ? T.TabOn : hov ? T.TabHov : T.TabOff;
             using (var path = T.TopRoundRect(r, T.TabRadius))
+            {
                 if (bg.A > 0)
                     using (var b = new SolidBrush(bg)) g.FillPath(b, path);
 
-            var tr = new Rectangle(r.Left + 4, r.Top, r.Width - CLOSE - 20, r.Height);
+                if (sel)
+                    using (var p = new Pen(T.Accent, 2.5f))
+                        g.DrawLine(p, r.Left + T.TabRadius / 2, r.Top + 1, r.Right - T.TabRadius / 2, r.Top + 1);
+            }
+
+            // Title
+            var tr = new Rectangle(r.Left + 12, r.Top, r.Width - CLOSE - 26, r.Height);
             TextRenderer.DrawText(g, TabPages[i].Text, Font, tr,
                 sel ? T.TxtBrt : T.Txt,
                 TextFormatFlags.VerticalCenter | TextFormatFlags.EndEllipsis | TextFormatFlags.SingleLine);
@@ -590,11 +585,11 @@ public class ChromeTabs : TabControl
         _xHov = _tabHov = -1;
         for (int i = 0; i < TabCount; i++)
         {
-            var r = GetTabRect(i);
-            if (r.Contains(e.Location))
+            var full = GetTabRect(i);
+            if (full.Contains(e.Location))
             {
                 _tabHov = i;
-                if (XRect(r).Contains(e.Location)) _xHov = i;
+                if (XRect(TabDrawRect(i)).Contains(e.Location)) _xHov = i;
                 break;
             }
         }
@@ -610,7 +605,7 @@ public class ChromeTabs : TabControl
     protected override void OnMouseClick(MouseEventArgs e)
     {
         for (int i = 0; i < TabCount; i++)
-            if (XRect(GetTabRect(i)).Contains(e.Location)) { RequestClose(i); return; }
+            if (XRect(TabDrawRect(i)).Contains(e.Location)) { RequestClose(i); return; }
         base.OnMouseClick(e);
     }
 
