@@ -454,36 +454,43 @@ public class ThemeSwitch : Control
 }
 
 // ════════════════════════════════════════════════════════════════════════════════
-//  Floating pill container — rounded, soft-shadowed, houses a group of controls
-//  (used to group zoom in/out/fit into one floating island over the page)
+//  Floating pill container — houses a group of controls in one rounded island
+//  (used to group zoom in/out/fit into one floating overlay over the page)
+//
+//  WinForms has no real see-through compositing against sibling controls — a
+//  "transparent" BackColor just repaints whatever the PARENT would draw there,
+//  not what's actually visible underneath (e.g. the PDF page). So instead of
+//  faking transparency, this clips its own window Region to the exact rounded
+//  outline: pixels outside that outline simply aren't part of this control at
+//  all, and the real page renders there natively with no compositing tricks.
 // ════════════════════════════════════════════════════════════════════════════════
 public class FloatPill : Control
 {
-    public const int Shadow = 6; // margin reserved around the visible pill for the shadow to bleed into
-
     public FloatPill()
     {
         SetStyle(ControlStyles.UserPaint | ControlStyles.OptimizedDoubleBuffer |
-                 ControlStyles.AllPaintingInWmPaint | ControlStyles.SupportsTransparentBackColor, true);
-        BackColor = Color.Transparent;
+                 ControlStyles.AllPaintingInWmPaint | ControlStyles.ResizeRedraw, true);
+    }
+
+    protected override void OnResize(EventArgs e)
+    {
+        base.OnResize(e);
+        if (Width <= 0 || Height <= 0) return;
+        var old = Region;
+        Region = new Region(T.RoundRect(new Rectangle(0, 0, Width, Height), Height / 2));
+        if (old != null) old.Dispose();
     }
 
     protected override void OnPaint(PaintEventArgs e)
     {
         var g = e.Graphics;
         g.SmoothingMode = SmoothingMode.AntiAlias;
-        var body = Rectangle.Inflate(ClientRectangle, -Shadow, -Shadow);
-        for (int i = Shadow; i >= 1; i--)
+        var body = new Rectangle(0, 0, Width - 1, Height - 1);
+        using (var path = T.RoundRect(body, Height / 2))
         {
-            int alpha = Math.Min(3 + (Shadow - i) * 5, 45);
-            using (var path = T.RoundRect(Rectangle.Inflate(body, i, i), body.Height / 2 + i))
-                using (var b = new SolidBrush(Color.FromArgb(alpha, 0, 0, 0)))
-                    g.FillPath(b, path);
-        }
-        using (var path = T.RoundRect(body, body.Height / 2))
             using (var b = new SolidBrush(T.PillBg)) g.FillPath(b, path);
-        using (var path = T.RoundRect(body, body.Height / 2))
             using (var p = new Pen(T.Border)) g.DrawPath(p, path);
+        }
     }
 }
 
@@ -1136,8 +1143,8 @@ public class MinimalPdfReader : Form
         int pillContentW = 0;
         for (int i = 0; i < pillItems.Length; i++) pillContentW += pillItems[i].Width + gapAfter[i];
         int pillBodyH = BTN_H + pad;
-        _zoomPill.Size = new Size(pillContentW + pad * 2 + FloatPill.Shadow * 2, pillBodyH + FloatPill.Shadow * 2);
-        int px = FloatPill.Shadow + pad, py = FloatPill.Shadow + (pillBodyH - BTN_H) / 2;
+        _zoomPill.Size = new Size(pillContentW + pad * 2, pillBodyH);
+        int px = pad, py = (pillBodyH - BTN_H) / 2;
         for (int i = 0; i < pillItems.Length; i++)
         {
             pillItems[i].Location = new Point(px, py);
