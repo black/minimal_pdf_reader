@@ -20,30 +20,10 @@ public static class PdfNative
     [DllImport("user32.dll")]
     public static extern bool SetProcessDPIAware();
 
+    // Native caption is back (no custom title bar) — just tell it to render dark.
     [DllImport("dwmapi.dll")]
     public static extern int DwmSetWindowAttribute(IntPtr hwnd, int attr, ref int attrValue, int attrSize);
-    public const int DWMWA_WINDOW_CORNER_PREFERENCE = 33;
-    public const int DWMWCP_ROUND = 2;
-
-    // ── Custom borderless title bar plumbing ───────────────────────────────
-    [DllImport("user32.dll")] public static extern bool ReleaseCapture();
-    [DllImport("user32.dll")] public static extern int SendMessage(IntPtr hWnd, int msg, int wParam, int lParam);
-    [DllImport("user32.dll")] public static extern IntPtr MonitorFromWindow(IntPtr handle, int flags);
-    [DllImport("user32.dll")] public static extern bool GetMonitorInfo(IntPtr hMonitor, ref MONITORINFO lpmi);
-
-    public const int WM_NCLBUTTONDOWN = 0xA1;
-    public const int HTCAPTION        = 0x2;
-    public const int WM_NCHITTEST     = 0x0084;
-    public const int WM_GETMINMAXINFO = 0x0024;
-    public const int MONITOR_DEFAULTTONEAREST = 2;
-    public const int HTLEFT = 10, HTRIGHT = 11, HTTOP = 12, HTTOPLEFT = 13, HTTOPRIGHT = 14, HTBOTTOM = 15, HTBOTTOMLEFT = 16, HTBOTTOMRIGHT = 17;
-
-    [StructLayout(LayoutKind.Sequential)] public struct POINT { public int X, Y; }
-    [StructLayout(LayoutKind.Sequential)] public struct RECT { public int Left, Top, Right, Bottom; }
-    [StructLayout(LayoutKind.Sequential)]
-    public struct MINMAXINFO { public POINT ptReserved, ptMaxSize, ptMaxPosition, ptMinTrackSize, ptMaxTrackSize; }
-    [StructLayout(LayoutKind.Sequential)]
-    public struct MONITORINFO { public int cbSize; public RECT rcMonitor, rcWork; public int dwFlags; }
+    public const int DWMWA_USE_IMMERSIVE_DARK_MODE = 20;
 
     [DllImport("pdfium.dll", CallingConvention = CallingConvention.Cdecl)] public static extern void FPDF_InitLibrary();
     [DllImport("pdfium.dll", CallingConvention = CallingConvention.Cdecl)] public static extern void FPDF_DestroyLibrary();
@@ -200,21 +180,6 @@ public static class Ico
         }
     }
 
-    // "space_dashboard"-style panel/layout glyph — a wide left pane and a stacked right pane.
-    public static void Dashboard(Graphics g, Rectangle r, Color c)
-    {
-        float cx = r.X + r.Width / 2f, cy = r.Y + r.Height / 2f, s = 8f;
-        var outer = new RectangleF(cx - s, cy - s, s * 2, s * 2);
-        using (var p = new Pen(c, 1.4f) { LineJoin = LineJoin.Round })
-        {
-            g.DrawRectangle(p, outer.X, outer.Y, outer.Width, outer.Height);
-            float midX = outer.X + outer.Width * 0.55f;
-            g.DrawLine(p, midX, outer.Y, midX, outer.Bottom);
-            float midY = outer.Y + outer.Height * 0.5f;
-            g.DrawLine(p, midX, midY, outer.Right, midY);
-        }
-    }
-
     public static void Sun(Graphics g, Rectangle r, Color c)
     {
         float cx = r.X + r.Width / 2f, cy = r.Y + r.Height / 2f, rad = 3.2f;
@@ -247,39 +212,6 @@ public static class Ico
         }
     }
 
-    // ── Window caption glyphs ────────────────────────────────────────────
-    public static void Minimize(Graphics g, Rectangle r, Color c)
-    {
-        float cx = r.X + r.Width / 2f, cy = r.Y + r.Height / 2f, s = 4.5f;
-        using (var p = new Pen(c, 1.2f)) g.DrawLine(p, cx - s, cy, cx + s, cy);
-    }
-
-    public static void Maximize(Graphics g, Rectangle r, Color c)
-    {
-        float cx = r.X + r.Width / 2f, cy = r.Y + r.Height / 2f, s = 4.2f;
-        using (var p = new Pen(c, 1.2f)) g.DrawRectangle(p, cx - s, cy - s, s * 2, s * 2);
-    }
-
-    // Two overlapping outline squares — outline-only, so the overlap reads fine with no fill knockout.
-    public static void Restore(Graphics g, Rectangle r, Color c)
-    {
-        float cx = r.X + r.Width / 2f, cy = r.Y + r.Height / 2f, s = 3.6f, off = 2.2f;
-        using (var p = new Pen(c, 1.2f))
-        {
-            g.DrawRectangle(p, cx - s + off, cy - s - off, s * 2, s * 2);
-            g.DrawRectangle(p, cx - s - off, cy - s + off, s * 2, s * 2);
-        }
-    }
-
-    public static void Close(Graphics g, Rectangle r, Color c)
-    {
-        float cx = r.X + r.Width / 2f, cy = r.Y + r.Height / 2f, s = 4.2f;
-        using (var p = new Pen(c, 1.2f))
-        {
-            g.DrawLine(p, cx - s, cy - s, cx + s, cy + s);
-            g.DrawLine(p, cx + s, cy - s, cx - s, cy + s);
-        }
-    }
 }
 
 // ════════════════════════════════════════════════════════════════════════════════
@@ -290,8 +222,6 @@ public class FlatBtn : Control
     bool _hov, _prs;
     public bool Accent;
     public bool Toggled;
-    public bool Square;    // no corner rounding — used for window caption buttons
-    public bool CloseBtn;  // red hover fill, Windows close-button convention
     public bool Filled;    // "standard" WinUI button — visible pill at rest, not just on hover
     public Action<Graphics, Rectangle, Color> Icon;
 
@@ -316,25 +246,22 @@ public class FlatBtn : Control
 
         bool special = Accent || Toggled;
         Color bg = special ? T.Accent
-                 : CloseBtn && _prs ? Color.FromArgb(180, 15, 10)
-                 : CloseBtn && _hov ? Color.FromArgb(232, 17, 35)
                  : _prs ? T.BtnPrs
                  : _hov ? (Filled ? T.PillHov : T.BtnHov)
                  : Filled ? T.PillBg
                  : Color.Empty;
 
         var rect = new Rectangle(0, 0, Width - 1, Height - 1);
-        using (var path = T.RoundRect(rect, Square ? 0 : T.Radius))
+        using (var path = T.RoundRect(rect, T.Radius))
         {
             if (bg != Color.Empty)
                 using (var b = new SolidBrush(bg)) g.FillPath(b, path);
-            if (!special && !Square && (_hov || _prs))
+            if (!special && (_hov || _prs))
                 using (var p = new Pen(T.Border)) g.DrawPath(p, path);
         }
 
         Color fg = !Enabled ? T.TxtDim
                  : special ? T.AccentTxt
-                 : CloseBtn && (_hov || _prs) ? Color.White
                  : T.TxtBrt;
 
         if (Icon != null && !string.IsNullOrEmpty(Text))
@@ -860,12 +787,10 @@ public class PdfViewer : UserControl
 public class MinimalPdfReader : Form
 {
     ChromeTabs _tabs;
-    Panel      _titleBar;
     Panel      _shell;
     Panel      _toolbar;
     Panel      _statusBar;
     FlatBtn    _btnOpen, _btnPrev, _btnNext, _btnZoomIn, _btnZoomOut, _btnFit;
-    FlatBtn    _btnMin, _btnMax, _btnClose;
     ThemeSwitch _themeSwitch;
     Label      _lblPage, _lblZoom;
     VSep       _sep1, _sep2, _sep3;
@@ -881,7 +806,6 @@ public class MinimalPdfReader : Form
         AutoScaleMode = AutoScaleMode.Dpi;
         AllowDrop = true;
         BackColor = T.Bg;
-        FormBorderStyle = FormBorderStyle.None;   // custom-drawn title bar below
         try { Icon = Icon.ExtractAssociatedIcon(Application.ExecutablePath); } catch { }
 
         try { PdfNative.FPDF_InitLibrary(); }
@@ -891,83 +815,18 @@ public class MinimalPdfReader : Form
         WireEvents();
     }
 
-    // A borderless form loses the native drop shadow — CS_DROPSHADOW restores it.
-    protected override CreateParams CreateParams
-    {
-        get
-        {
-            CreateParams cp = base.CreateParams;
-            cp.ClassStyle |= 0x00020000; // CS_DROPSHADOW
-            return cp;
-        }
-    }
-
-    // Win11 doesn't auto-round borderless windows the way it does normal ones — ask explicitly.
+    // Native title bar (default min/maximize/close) — just tell it to render dark to match the app.
     protected override void OnHandleCreated(EventArgs e)
     {
         base.OnHandleCreated(e);
-        int pref = PdfNative.DWMWCP_ROUND;
-        try { PdfNative.DwmSetWindowAttribute(Handle, PdfNative.DWMWA_WINDOW_CORNER_PREFERENCE, ref pref, sizeof(int)); } catch { }
+        ApplyTitleBarTheme();
     }
 
-    // ── Borderless-window plumbing: resize handles + maximize that respects the taskbar ──
-    protected override void WndProc(ref Message m)
+    void ApplyTitleBarTheme()
     {
-        if (m.Msg == PdfNative.WM_GETMINMAXINFO)
-        {
-            WmGetMinMaxInfo(m);
-        }
-        else if (m.Msg == PdfNative.WM_NCHITTEST && WindowState == FormWindowState.Normal)
-        {
-            base.WndProc(ref m);
-            if (unchecked((int)(long)m.Result) == 1) // HTCLIENT — refine into resize-edge zones
-            {
-                int lp = unchecked((int)(long)m.LParam);
-                int x = unchecked((short)(lp & 0xFFFF));
-                int y = unchecked((short)((lp >> 16) & 0xFFFF));
-                Point pos = PointToClient(new Point(x, y));
-                const int B = 6;
-                bool left = pos.X <= B, right = pos.X >= ClientSize.Width - B;
-                bool top = pos.Y <= B, bottom = pos.Y >= ClientSize.Height - B;
-                if (top && left) m.Result = (IntPtr)PdfNative.HTTOPLEFT;
-                else if (top && right) m.Result = (IntPtr)PdfNative.HTTOPRIGHT;
-                else if (bottom && left) m.Result = (IntPtr)PdfNative.HTBOTTOMLEFT;
-                else if (bottom && right) m.Result = (IntPtr)PdfNative.HTBOTTOMRIGHT;
-                else if (left) m.Result = (IntPtr)PdfNative.HTLEFT;
-                else if (right) m.Result = (IntPtr)PdfNative.HTRIGHT;
-                else if (top) m.Result = (IntPtr)PdfNative.HTTOP;
-                else if (bottom) m.Result = (IntPtr)PdfNative.HTBOTTOM;
-            }
-            return;
-        }
-        base.WndProc(ref m);
-    }
-
-    // Borderless forms maximize to the full monitor rect (covering the taskbar) unless told otherwise.
-    void WmGetMinMaxInfo(Message m)
-    {
-        var mmi = (PdfNative.MINMAXINFO)Marshal.PtrToStructure(m.LParam, typeof(PdfNative.MINMAXINFO));
-        IntPtr monitor = PdfNative.MonitorFromWindow(Handle, PdfNative.MONITOR_DEFAULTTONEAREST);
-        if (monitor != IntPtr.Zero)
-        {
-            var mi = new PdfNative.MONITORINFO();
-            mi.cbSize = Marshal.SizeOf(typeof(PdfNative.MONITORINFO));
-            PdfNative.GetMonitorInfo(monitor, ref mi);
-            var work = mi.rcWork; var mon = mi.rcMonitor;
-            mmi.ptMaxPosition.X = work.Left - mon.Left;
-            mmi.ptMaxPosition.Y = work.Top - mon.Top;
-            mmi.ptMaxSize.X = work.Right - work.Left;
-            mmi.ptMaxSize.Y = work.Bottom - work.Top;
-        }
-        mmi.ptMinTrackSize.X = MinimumSize.Width;
-        mmi.ptMinTrackSize.Y = MinimumSize.Height;
-        Marshal.StructureToPtr(mmi, m.LParam, true);
-    }
-
-    void ToggleMaximizeRestore()
-    {
-        WindowState = (WindowState == FormWindowState.Maximized) ? FormWindowState.Normal : FormWindowState.Maximized;
-        if (_btnMax != null) _btnMax.Invalidate();
+        if (!IsHandleCreated) return;
+        int dark = T.Dark ? 1 : 0;
+        try { PdfNative.DwmSetWindowAttribute(Handle, PdfNative.DWMWA_USE_IMMERSIVE_DARK_MODE, ref dark, sizeof(int)); } catch { }
     }
 
     // ── UI construction ──────────────────────────────────────────────────────
@@ -976,7 +835,7 @@ public class MinimalPdfReader : Form
         // Outer margin frame: header-tier background showing around a lighter, rounded
         // content card (toolbar/tabs/canvas/status bar) — matches the design file's
         // two-layer structure (dark chrome frame + inset rounded content panel).
-        _shell = new Panel { Dock = DockStyle.Fill, BackColor = T.Bg, Padding = new Padding(10, 0, 10, 10) };
+        _shell = new Panel { Dock = DockStyle.Fill, BackColor = T.Bg, Padding = new Padding(10) };
 
         // ── Status bar ───────────────────────────────────────────────────────
         _statusBar = new Panel { Dock = DockStyle.Bottom, Height = 28, BackColor = T.Bg };
@@ -996,8 +855,8 @@ public class MinimalPdfReader : Form
         _statusBar.Controls.Add(_statRight);
         _shell.Controls.Add(_statusBar);
 
-        // ── Toolbar (page nav / zoom / fit — centred) ───────────────────────────
-        _toolbar = new Panel { Dock = DockStyle.Top, Height = 56, BackColor = T.Bg };
+        // ── Toolbar (Open, page nav / zoom / fit, theme toggle) ─────────────────
+        _toolbar = new Panel { Dock = DockStyle.Top, Height = 64, BackColor = T.Bg };
         _toolbar.Paint += (s, e) => {
             var g = e.Graphics; g.SmoothingMode = SmoothingMode.AntiAlias;
             using (var path = T.TopRoundRect(new Rectangle(0, 0, _toolbar.Width, _toolbar.Height), 10))
@@ -1014,7 +873,16 @@ public class MinimalPdfReader : Form
         _btnZoomIn = new FlatBtn("",     40, BTN_H) { Icon = (g, r, c) => Ico.PlusMinus(g, r, c, true) };
         _btnFit    = new FlatBtn("Fit",  56, BTN_H);
 
+        // Open is the primary action (filled pill, always visible — like a WinUI "standard" button).
+        _btnOpen  = new FlatBtn("Open", 92, 36) { Icon = Ico.Folder, Filled = true };
+        FitButton(_btnOpen);
+
+        _themeSwitch = new ThemeSwitch { On = !T.Dark };
+        _themeSwitch.Toggled += (s, e) => { T.Dark = !_themeSwitch.On; ApplyTheme(); };
+
         _tips = new ToolTip { AutomaticDelay = 400, ShowAlways = true };
+        _tips.SetToolTip(_btnOpen,    "Open PDF (Ctrl+O)");
+        _tips.SetToolTip(_themeSwitch,"Toggle dark / light theme");
         _tips.SetToolTip(_btnPrev,    "Previous page (←)");
         _tips.SetToolTip(_btnNext,    "Next page (→)");
         _tips.SetToolTip(_btnZoomOut, "Zoom out (Ctrl+Scroll)");
@@ -1042,57 +910,14 @@ public class MinimalPdfReader : Form
             cx += c.Width + GAP;
         }
 
-        int topV = (_toolbar.Height - BTN_H) / 2;
-        _centerFlow.Location = new Point((_toolbar.Width - _centerFlow.Width) / 2, topV);
         _toolbar.Controls.Add(_centerFlow);
-        _toolbar.Resize += (s, e) => {
-            _centerFlow.Location = new Point((_toolbar.Width - _centerFlow.Width) / 2, (_toolbar.Height - BTN_H) / 2);
-        };
+        _toolbar.Controls.Add(_btnOpen);
+        _toolbar.Controls.Add(_themeSwitch);
+        LayoutToolbar(BTN_H);
+        _toolbar.Resize += (s, e) => LayoutToolbar(BTN_H);
 
         _shell.Controls.Add(_toolbar);
-
-        // ── Custom title bar (replaces native chrome) ───────────────────────────
-        const int TITLE_H = 64, CAP_W = 46, ICON_SZ = 24, MARGIN = 24;
-        _titleBar = new Panel { Dock = DockStyle.Top, Height = TITLE_H, BackColor = T.Bg };
-        _titleBar.Paint += (s, e) => {
-            var g = e.Graphics; g.SmoothingMode = SmoothingMode.AntiAlias;
-            Ico.Dashboard(g, new Rectangle(MARGIN, (TITLE_H - ICON_SZ) / 2, ICON_SZ, ICON_SZ), T.Txt);
-            DrawTracked(g, Text.ToUpperInvariant(), T.UiFont, new Rectangle(MARGIN + ICON_SZ + 16, 0, 300, TITLE_H), T.Txt, 2);
-        };
-        _titleBar.MouseDown += (s, e) => {
-            if (e.Button == MouseButtons.Left)
-            {
-                PdfNative.ReleaseCapture();
-                PdfNative.SendMessage(Handle, PdfNative.WM_NCLBUTTONDOWN, PdfNative.HTCAPTION, 0);
-            }
-        };
-        _titleBar.MouseDoubleClick += (s, e) => ToggleMaximizeRestore();
-
-        // Open is the primary action (filled pill, always visible — like a WinUI "standard" button).
-        _btnOpen  = new FlatBtn("Open", 92, 36) { Icon = Ico.Folder, Filled = true };
-        FitButton(_btnOpen);
-        _tips.SetToolTip(_btnOpen, "Open PDF (Ctrl+O)");
-
-        _themeSwitch = new ThemeSwitch { On = !T.Dark };
-        _themeSwitch.Toggled += (s, e) => { T.Dark = !_themeSwitch.On; ApplyTheme(); };
-        _tips.SetToolTip(_themeSwitch, "Toggle dark / light theme");
-
-        // Caption button order follows the design file: minimize, close, maximize (left to right).
-        _btnMin   = new FlatBtn("", CAP_W, TITLE_H) { Square = true, Icon = Ico.Minimize };
-        _btnClose = new FlatBtn("", CAP_W, TITLE_H) { Square = true, CloseBtn = true, Icon = Ico.Close };
-        _btnMax   = new FlatBtn("", CAP_W, TITLE_H) { Square = true, Icon = (g, r, c) => { if (WindowState == FormWindowState.Maximized) Ico.Restore(g, r, c); else Ico.Maximize(g, r, c); } };
-
-        _titleBar.Controls.Add(_btnOpen);
-        _titleBar.Controls.Add(_themeSwitch);
-        _titleBar.Controls.Add(_btnMin);
-        _titleBar.Controls.Add(_btnClose);
-        _titleBar.Controls.Add(_btnMax);
-        LayoutTitleBar(TITLE_H, CAP_W);
-        _titleBar.Resize += (s, e) => LayoutTitleBar(TITLE_H, CAP_W);
-
-        Controls.Add(_titleBar);
         Controls.Add(_shell);
-        Resize += (s, e) => { if (_btnMax != null) _btnMax.Invalidate(); };
 
         // ── Tab control ──────────────────────────────────────────────────────
         _tabs = new ChromeTabs { Dock = DockStyle.Fill };
@@ -1103,6 +928,14 @@ public class MinimalPdfReader : Form
         UpdateToolbarEnabled();
     }
 
+    void LayoutToolbar(int btnH)
+    {
+        int topV = (_toolbar.Height - btnH) / 2;
+        _centerFlow.Location  = new Point((_toolbar.Width - _centerFlow.Width) / 2, topV);
+        _btnOpen.Location     = new Point(16, (_toolbar.Height - _btnOpen.Height) / 2);
+        _themeSwitch.Location = new Point(_toolbar.Width - 16 - _themeSwitch.Width, (_toolbar.Height - _themeSwitch.Height) / 2);
+    }
+
     // Icon+label buttons must be measured, not guessed — a fixed pixel width truncates
     // as soon as the font renders wider than expected (DPI scaling, "Light" vs "Dark", etc).
     void FitButton(FlatBtn b)
@@ -1111,30 +944,6 @@ public class MinimalPdfReader : Form
         int textW = TextRenderer.MeasureText(b.Text, b.Font, new Size(int.MaxValue, b.Height), TextFormatFlags.SingleLine).Width;
         int iconZone = (b.Icon != null) ? 8 + 22 : 8;
         b.Width = iconZone + textW + 14;
-    }
-
-    void LayoutTitleBar(int titleH, int capW)
-    {
-        // Left to right: minimize, close, maximize — matches the design file's order.
-        _btnMax.Location    = new Point(_titleBar.Width - capW, 0);
-        _btnClose.Location  = new Point(_btnMax.Left - capW, 0);
-        _btnMin.Location    = new Point(_btnClose.Left - capW, 0);
-        _themeSwitch.Location = new Point(_btnMin.Left - 40 - _themeSwitch.Width, (titleH - _themeSwitch.Height) / 2);
-        _btnOpen.Location   = new Point(_themeSwitch.Left - 24 - _btnOpen.Width, (titleH - _btnOpen.Height) / 2);
-    }
-
-    // Manual letter-spacing — TextRenderer has no tracking option, so draw glyph by glyph.
-    static void DrawTracked(Graphics g, string text, Font font, Rectangle rect, Color color, int trackingPx)
-    {
-        int x = rect.X;
-        foreach (char ch in text)
-        {
-            string s = ch.ToString();
-            Size sz = TextRenderer.MeasureText(g, s, font, new Size(int.MaxValue, rect.Height), TextFormatFlags.NoPadding | TextFormatFlags.SingleLine);
-            TextRenderer.DrawText(g, s, font, new Rectangle(x, rect.Y, sz.Width + trackingPx, rect.Height), color,
-                TextFormatFlags.NoPadding | TextFormatFlags.VerticalCenter | TextFormatFlags.SingleLine);
-            x += sz.Width + trackingPx;
-        }
     }
 
     Label MkLabel(string text, DockStyle dock, int w)
@@ -1150,9 +959,6 @@ public class MinimalPdfReader : Form
         _btnZoomIn.Click  += (s, e) => { var v = Active(); if (v != null) v.SetZoom(v.ZoomLevel + 0.2f); };
         _btnZoomOut.Click += (s, e) => { var v = Active(); if (v != null) v.SetZoom(v.ZoomLevel - 0.2f); };
         _btnFit.Click     += (s, e) => { var v = Active(); if (v != null) v.FitWidth(); };
-        _btnMin.Click     += (s, e) => WindowState = FormWindowState.Minimized;
-        _btnMax.Click     += (s, e) => ToggleMaximizeRestore();
-        _btnClose.Click   += (s, e) => Close();
 
         DragEnter += (s, e) => { if (e.Data.GetDataPresent(DataFormats.FileDrop)) e.Effect = DragDropEffects.Copy; };
         DragDrop  += (s, e) => {
@@ -1230,10 +1036,9 @@ public class MinimalPdfReader : Form
     void ApplyTheme()
     {
         BackColor = T.Bg;
+        ApplyTitleBarTheme();
         _themeSwitch.On = !T.Dark;
         _themeSwitch.Invalidate();
-        _titleBar.BackColor = T.Bg;
-        _titleBar.Invalidate();
         _shell.BackColor = T.Bg;
         _shell.Invalidate();
         _toolbar.BackColor = T.Bg;
@@ -1243,9 +1048,6 @@ public class MinimalPdfReader : Form
         _statusBar.Invalidate();
         _tabs.ApplyTheme();
         _tabs.BackColor = T.TabBg;
-
-        foreach (Control c in _titleBar.Controls)
-        { FlatBtn b = c as FlatBtn; if (b != null) b.Refresh2(); }
 
         foreach (Control c in _toolbar.Controls)
         {
