@@ -98,6 +98,9 @@ public static class T
     public static Color TxtBrt { get { return Dark ? D(255, 255, 255) : D(0, 0, 0);      } }
     public static Color BtnHov { get { return Dark ? D(62, 62, 62)    : D(229, 229, 229); } }
     public static Color BtnPrs { get { return Dark ? D(48, 48, 48)    : D(213, 213, 213); } }
+    // "Filled" (standard, WinUI-style) buttons stay visible at rest instead of only on hover.
+    public static Color PillBg  { get { return Dark ? D(58, 58, 58)   : D(235, 235, 235); } }
+    public static Color PillHov { get { return Dark ? D(74, 74, 74)   : D(221, 221, 221); } }
     public static Color Sep    { get { return Dark ? D(60, 60, 60)    : D(225, 225, 225); } }
     public static Color Border { get { return Dark ? D(70, 70, 70)    : D(210, 210, 210); } }
 
@@ -259,6 +262,7 @@ public class FlatBtn : Control
     public bool Toggled;
     public bool Square;    // no corner rounding — used for window caption buttons
     public bool CloseBtn;  // red hover fill, Windows close-button convention
+    public bool Filled;    // "standard" WinUI button — visible pill at rest, not just on hover
     public Action<Graphics, Rectangle, Color> Icon;
 
     public FlatBtn(string text, int w = 72, int h = 30)
@@ -285,7 +289,8 @@ public class FlatBtn : Control
                  : CloseBtn && _prs ? Color.FromArgb(180, 15, 10)
                  : CloseBtn && _hov ? Color.FromArgb(232, 17, 35)
                  : _prs ? T.BtnPrs
-                 : _hov ? T.BtnHov
+                 : _hov ? (Filled ? T.PillHov : T.BtnHov)
+                 : Filled ? T.PillBg
                  : Color.Empty;
 
         var rect = new Rectangle(0, 0, Width - 1, Height - 1);
@@ -948,12 +953,12 @@ public class MinimalPdfReader : Form
         Controls.Add(_toolbar);
 
         // ── Custom title bar (replaces native chrome) ───────────────────────────
-        const int TITLE_H = 40, CAP_W = 46;
+        const int TITLE_H = 56, CAP_W = 46, ICON_SZ = 20;
         _titleBar = new Panel { Dock = DockStyle.Top, Height = TITLE_H, BackColor = T.Bar };
         _titleBar.Paint += (s, e) => {
             var g = e.Graphics; g.SmoothingMode = SmoothingMode.AntiAlias;
-            if (_titleIcon != null) g.DrawImage(_titleIcon, new Rectangle(14, (TITLE_H - 18) / 2, 18, 18));
-            TextRenderer.DrawText(g, Text, T.UiFont, new Rectangle(40, 0, 300, TITLE_H), T.Txt,
+            if (_titleIcon != null) g.DrawImage(_titleIcon, new Rectangle(18, (TITLE_H - ICON_SZ) / 2, ICON_SZ, ICON_SZ));
+            TextRenderer.DrawText(g, Text, T.UiFont, new Rectangle(18 + ICON_SZ + 10, 0, 300, TITLE_H), T.Txt,
                 TextFormatFlags.VerticalCenter | TextFormatFlags.Left | TextFormatFlags.SingleLine);
         };
         _titleBar.MouseDown += (s, e) => {
@@ -965,8 +970,10 @@ public class MinimalPdfReader : Form
         };
         _titleBar.MouseDoubleClick += (s, e) => ToggleMaximizeRestore();
 
-        _btnOpen  = new FlatBtn("Open", 92, 30) { Icon = Ico.Folder };
-        _btnTheme = new FlatBtn("Dark", 88, 30) { Icon = (g, r, c) => { if (T.Dark) Ico.Moon(g, r, c); else Ico.Sun(g, r, c); } };
+        // Open reads as the primary action (filled pill, always visible — like Photos' "Import");
+        // the theme toggle stays a plain subtle button, like a settings icon.
+        _btnOpen  = new FlatBtn("Open", 92, 36) { Icon = Ico.Folder, Filled = true };
+        _btnTheme = new FlatBtn("Dark", 88, 36) { Icon = (g, r, c) => { if (T.Dark) Ico.Moon(g, r, c); else Ico.Sun(g, r, c); } };
         _btnTheme.Toggled = T.Dark;
         FitButton(_btnOpen);
         FitButton(_btnTheme);
@@ -1012,8 +1019,8 @@ public class MinimalPdfReader : Form
         _btnClose.Location = new Point(_titleBar.Width - capW, 0);
         _btnMax.Location   = new Point(_btnClose.Left - capW, 0);
         _btnMin.Location   = new Point(_btnMax.Left - capW, 0);
-        _btnTheme.Location = new Point(_btnMin.Left - 12 - _btnTheme.Width, (titleH - _btnTheme.Height) / 2);
-        _btnOpen.Location  = new Point(_btnTheme.Left - 8 - _btnOpen.Width, (titleH - _btnOpen.Height) / 2);
+        _btnTheme.Location = new Point(_btnMin.Left - 16 - _btnTheme.Width, (titleH - _btnTheme.Height) / 2);
+        _btnOpen.Location  = new Point(_btnTheme.Left - 12 - _btnOpen.Width, (titleH - _btnOpen.Height) / 2);
     }
 
     Label MkLabel(string text, DockStyle dock, int w)
