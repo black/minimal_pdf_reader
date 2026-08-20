@@ -68,10 +68,11 @@ public static class T
     // below the title bar (toolbar, tabs, canvas, status bar) shares the Bar tone.
     public static Color Bg     { get { return Dark ? D(0x20, 0x20, 0x20) : D(255, 255, 255); } }
     public static Color Bar    { get { return Dark ? D(0x27, 0x27, 0x27) : D(247, 247, 247); } }
-    // The tab strip chrome matches the header tier it's attached to; the selected
-    // tab matches the content tier underneath so it visually merges with the page.
-    public static Color TabBg  { get { return Bg; } }
-    public static Color TabOn  { get { return Bar; } }
+    // The whole content card (toolbar, tab strip, canvas, status bar) is one uniform
+    // surface now that there's no separate header row above it — tabs read as raised
+    // pills sitting on that surface rather than a separate darker chrome band.
+    public static Color TabBg  { get { return Bar; } }
+    public static Color TabOn  { get { return PillBg; } }
     public static Color TabOff { get { return Dark ? Color.FromArgb(16, 255, 255, 255) : Color.FromArgb(10, 0, 0, 0); } }
     public static Color TabHov { get { return Dark ? D(66, 66, 66)    : D(225, 225, 225); } }
     public static Color Canvas { get { return Bar; } }
@@ -177,6 +178,21 @@ public static class Ico
         {
             g.DrawRectangle(p, body.X, body.Y, body.Width, body.Height);
             g.DrawLines(p, new[] { new PointF(tab.X, tab.Bottom), new PointF(tab.X, tab.Y), new PointF(tab.Right, tab.Y), new PointF(tab.Right + 1, tab.Bottom) });
+        }
+    }
+
+    // "space_dashboard"-style panel/layout glyph — matches the design file's app-mark icon.
+    public static void Dashboard(Graphics g, Rectangle r, Color c)
+    {
+        float cx = r.X + r.Width / 2f, cy = r.Y + r.Height / 2f, s = 8f;
+        var outer = new RectangleF(cx - s, cy - s, s * 2, s * 2);
+        using (var p = new Pen(c, 1.4f) { LineJoin = LineJoin.Round })
+        {
+            g.DrawRectangle(p, outer.X, outer.Y, outer.Width, outer.Height);
+            float midX = outer.X + outer.Width * 0.55f;
+            g.DrawLine(p, midX, outer.Y, midX, outer.Bottom);
+            float midY = outer.Y + outer.Height * 0.5f;
+            g.DrawLine(p, midX, midY, outer.Right, midY);
         }
     }
 
@@ -292,8 +308,22 @@ public class FlatBtn : Control
 public class ThemeSwitch : Control
 {
     bool _hov;
-    public bool On; // true = light mode (sun, thumb right); false = dark mode (moon, thumb left)
+    bool _on;
+    float _pos; // animated 0 (dark/moon/thumb-left) .. 1 (light/sun/thumb-right)
+    Timer _anim;
     public event EventHandler Toggled;
+
+    public bool On
+    {
+        get { return _on; }
+        set
+        {
+            if (_on == value) return; // already correct — don't stomp an in-progress animation
+            _on = value;
+            _pos = value ? 1f : 0f;   // programmatic set (e.g. initial sync) — snap, no animation
+            Invalidate();
+        }
+    }
 
     public ThemeSwitch()
     {
@@ -302,16 +332,38 @@ public class ThemeSwitch : Control
                  ControlStyles.AllPaintingInWmPaint | ControlStyles.SupportsTransparentBackColor, true);
         BackColor = Color.Transparent;
         Cursor = Cursors.Hand;
+        _anim = new Timer { Interval = 15 };
+        _anim.Tick += (s, e) => StepAnim();
+    }
+
+    void StepAnim()
+    {
+        float target = _on ? 1f : 0f;
+        _pos += (target - _pos) * 0.25f; // eased — fast start, settles smoothly
+        if (Math.Abs(target - _pos) < 0.01f) { _pos = target; _anim.Stop(); }
+        Invalidate();
     }
 
     protected override void OnMouseEnter(EventArgs e) { _hov = true;  Invalidate(); base.OnMouseEnter(e); }
     protected override void OnMouseLeave(EventArgs e) { _hov = false; Invalidate(); base.OnMouseLeave(e); }
     protected override void OnClick(EventArgs e)
     {
-        On = !On;
-        Invalidate();
+        _on = !_on;
+        _anim.Start();
         if (Toggled != null) Toggled(this, EventArgs.Empty);
         base.OnClick(e);
+    }
+
+    protected override void Dispose(bool disposing)
+    {
+        if (disposing && _anim != null) _anim.Dispose();
+        base.Dispose(disposing);
+    }
+
+    static float Lerp(float a, float b, float t) { return a + (b - a) * t; }
+    static Color Lerp(Color a, Color b, float t)
+    {
+        return Color.FromArgb((int)Lerp(a.A, b.A, t), (int)Lerp(a.R, b.R, t), (int)Lerp(a.G, b.G, t), (int)Lerp(a.B, b.B, t));
     }
 
     protected override void OnPaint(PaintEventArgs e)
@@ -320,41 +372,56 @@ public class ThemeSwitch : Control
         g.SmoothingMode = SmoothingMode.AntiAlias;
         var rect = new Rectangle(0, 0, Width - 1, Height - 1);
 
-        Color track = On ? T.ToggleOn : T.PillBg;
-        if (_hov) track = On ? ControlPaint.Light(track, 0.1f) : T.PillHov;
-
+        Color trackOff = _hov ? T.PillHov : T.PillBg;
+        Color trackOn  = _hov ? ControlPaint.Light(T.ToggleOn, 0.1f) : T.ToggleOn;
         using (var path = T.RoundRect(rect, Height / 2))
-            using (var b = new SolidBrush(track)) g.FillPath(b, path);
+            using (var b = new SolidBrush(Lerp(trackOff, trackOn, _pos))) g.FillPath(b, path);
 
-        int pad = 6, iconD = Height - pad * 2;
-        var iconRect = new Rectangle(pad, pad, iconD, iconD);
-        var thumbRect = new Rectangle(Width - pad - iconD, pad, iconD, iconD);
-        if (!On) { var t = iconRect; iconRect = thumbRect; thumbRect = t; } // sun/thumb swap sides with state
+        int pad = 6, d = Height - pad * 2;
+        float leftX = pad, rightX = Width - pad - d;
+        var iconRect  = new Rectangle((int)Lerp(rightX, leftX, _pos), pad, d, d); // right(dark) -> left(light)
+        var thumbRect = new Rectangle((int)Lerp(leftX, rightX, _pos), pad, d, d); // left(dark) -> right(light)
 
-        Color iconColor = On ? Color.FromArgb(90, 70, 10) : T.TxtBrt;
-        if (On) Ico.Sun(g, iconRect, iconColor); else Ico.Moon(g, iconRect, iconColor);
+        Color iconColor = Lerp(T.TxtBrt, Color.FromArgb(90, 70, 10), _pos);
+        if (_pos >= 0.5f) Ico.Sun(g, iconRect, iconColor); else Ico.Moon(g, iconRect, iconColor);
 
-        Color thumbColor = On ? Color.FromArgb(255, 255, 255) : T.TxtDim;
+        Color thumbColor = Lerp(T.TxtDim, Color.White, _pos);
         using (var b = new SolidBrush(thumbColor)) g.FillEllipse(b, thumbRect);
     }
 }
 
 // ════════════════════════════════════════════════════════════════════════════════
-//  Vertical separator
+//  Floating pill container — rounded, soft-shadowed, houses a group of controls
+//  (used to group zoom in/out/fit into one floating island over the page)
 // ════════════════════════════════════════════════════════════════════════════════
-public class VSep : Control
+public class FloatPill : Control
 {
-    public VSep()
+    public const int Shadow = 6; // margin reserved around the visible pill for the shadow to bleed into
+
+    public FloatPill()
     {
-        Size = new Size(12, 40);
-        SetStyle(ControlStyles.UserPaint | ControlStyles.OptimizedDoubleBuffer | ControlStyles.AllPaintingInWmPaint, true);
-        BackColor = T.Bar;
+        SetStyle(ControlStyles.UserPaint | ControlStyles.OptimizedDoubleBuffer |
+                 ControlStyles.AllPaintingInWmPaint | ControlStyles.SupportsTransparentBackColor, true);
+        BackColor = Color.Transparent;
     }
+
     protected override void OnPaint(PaintEventArgs e)
     {
-        using (var p = new Pen(T.Sep)) e.Graphics.DrawLine(p, 5, 4, 5, Height - 4);
+        var g = e.Graphics;
+        g.SmoothingMode = SmoothingMode.AntiAlias;
+        var body = Rectangle.Inflate(ClientRectangle, -Shadow, -Shadow);
+        for (int i = Shadow; i >= 1; i--)
+        {
+            int alpha = Math.Min(3 + (Shadow - i) * 5, 45);
+            using (var path = T.RoundRect(Rectangle.Inflate(body, i, i), body.Height / 2 + i))
+                using (var b = new SolidBrush(Color.FromArgb(alpha, 0, 0, 0)))
+                    g.FillPath(b, path);
+        }
+        using (var path = T.RoundRect(body, body.Height / 2))
+            using (var b = new SolidBrush(T.PillBg)) g.FillPath(b, path);
+        using (var path = T.RoundRect(body, body.Height / 2))
+            using (var p = new Pen(T.Border)) g.DrawPath(p, path);
     }
-    public void Refresh2() { BackColor = T.Bar; Invalidate(); }
 }
 
 // ════════════════════════════════════════════════════════════════════════════════
@@ -790,10 +857,10 @@ public class MinimalPdfReader : Form
     Panel      _shell;
     Panel      _toolbar;
     Panel      _statusBar;
+    FloatPill  _zoomPill;
     FlatBtn    _btnOpen, _btnPrev, _btnNext, _btnZoomIn, _btnZoomOut, _btnFit;
     ThemeSwitch _themeSwitch;
     Label      _lblPage, _lblZoom;
-    VSep       _sep1, _sep2, _sep3;
     Label      _statLeft, _statRight;
     Panel _centerFlow;
     ToolTip _tips;
@@ -855,13 +922,17 @@ public class MinimalPdfReader : Form
         _statusBar.Controls.Add(_statRight);
         _shell.Controls.Add(_statusBar);
 
-        // ── Toolbar (Open, page nav / zoom / fit, theme toggle) ─────────────────
+        // ── Toolbar (brand mark, Open, page nav, theme toggle) ──────────────────
+        const int BRAND_ICON = 22, BRAND_MARGIN = 16;
         _toolbar = new Panel { Dock = DockStyle.Top, Height = 64, BackColor = T.Bg };
         _toolbar.Paint += (s, e) => {
             var g = e.Graphics; g.SmoothingMode = SmoothingMode.AntiAlias;
             using (var path = T.TopRoundRect(new Rectangle(0, 0, _toolbar.Width, _toolbar.Height), 10))
                 using (var b = new SolidBrush(T.Bar)) g.FillPath(b, path);
             using (var p = new Pen(T.Sep)) g.DrawLine(p, 0, _toolbar.Height - 1, _toolbar.Width, _toolbar.Height - 1);
+            Ico.Dashboard(g, new Rectangle(BRAND_MARGIN, (_toolbar.Height - BRAND_ICON) / 2, BRAND_ICON, BRAND_ICON), T.Txt);
+            DrawTracked(g, Text.ToUpperInvariant(), T.UiFont,
+                new Rectangle(BRAND_MARGIN + BRAND_ICON + 10, 0, 300, _toolbar.Height), T.Txt, 2);
         };
 
         const int BTN_H = 40;
@@ -891,15 +962,12 @@ public class MinimalPdfReader : Form
 
         _lblPage   = new Label { Text = "—",    Size = new Size(100, BTN_H), TextAlign = ContentAlignment.MiddleCenter, ForeColor = T.Txt, Font = T.UiBig, BackColor = Color.Transparent };
         _lblZoom   = new Label { Text = "100%", Size = new Size( 68, BTN_H), TextAlign = ContentAlignment.MiddleCenter, ForeColor = T.Txt, Font = T.UiBig, BackColor = Color.Transparent };
-        _sep1      = new VSep { Size = new Size(12, BTN_H) };
-        _sep2      = new VSep { Size = new Size(12, BTN_H) };
-        _sep3      = new VSep { Visible = false };
 
-        // Lay out the center strip on a plain Panel — no layout manager, no surprises
-        Control[] strip = { _btnPrev, _lblPage, _btnNext, _sep1, _btnZoomOut, _lblZoom, _btnZoomIn, _sep2, _btnFit };
+        // Page-nav strip stays in the toolbar; zoom/fit are grouped into the floating pill below.
+        Control[] strip = { _btnPrev, _lblPage, _btnNext };
         int stripW = 0;
         foreach (Control c in strip) stripW += c.Width + GAP;
-        stripW -= GAP; // no trailing gap
+        stripW -= GAP;
 
         _centerFlow = new Panel { Size = new Size(stripW, BTN_H), BackColor = Color.Transparent };
         int cx = 0;
@@ -910,11 +978,17 @@ public class MinimalPdfReader : Form
             cx += c.Width + GAP;
         }
 
+        // Measure the brand text once (static string) so Open can be placed right after it.
+        int brandTextW;
+        using (var mg = CreateGraphics())
+            brandTextW = DrawTracked(mg, Text.ToUpperInvariant(), T.UiFont, new Rectangle(0, 0, 500, BTN_H), Color.Black, 2, false);
+        int openLeft = BRAND_MARGIN + BRAND_ICON + 10 + brandTextW + 24;
+
         _toolbar.Controls.Add(_centerFlow);
         _toolbar.Controls.Add(_btnOpen);
         _toolbar.Controls.Add(_themeSwitch);
-        LayoutToolbar(BTN_H);
-        _toolbar.Resize += (s, e) => LayoutToolbar(BTN_H);
+        LayoutToolbar(BTN_H, openLeft);
+        _toolbar.Resize += (s, e) => LayoutToolbar(BTN_H, openLeft);
 
         _shell.Controls.Add(_toolbar);
         Controls.Add(_shell);
@@ -923,17 +997,44 @@ public class MinimalPdfReader : Form
         _tabs = new ChromeTabs { Dock = DockStyle.Fill };
         _tabs.SelectedIndexChanged += (s, e) => { BindActive(); UpdateStatus(); };
         _shell.Controls.Add(_tabs);
-
         _tabs.BringToFront();
+
+        // ── Floating zoom pill — groups zoom out/in and fit into one island over the page ──
+        _zoomPill = new FloatPill();
+        Control[] pillItems = { _btnZoomOut, _lblZoom, _btnZoomIn, _btnFit };
+        int pillGap = 14, pad = 10;
+        int pillContentW = 0;
+        foreach (Control c in pillItems) pillContentW += c.Width;
+        pillContentW += GAP * 2 + pillGap; // gaps: out-label, label-in are GAP; in-fit is the wider pillGap
+        int pillBodyH = BTN_H + pad;
+        _zoomPill.Size = new Size(pillContentW + pad * 2 + FloatPill.Shadow * 2, pillBodyH + FloatPill.Shadow * 2);
+        int px = FloatPill.Shadow + pad, py = FloatPill.Shadow + (pillBodyH - BTN_H) / 2;
+        for (int i = 0; i < pillItems.Length; i++)
+        {
+            pillItems[i].Location = new Point(px, py);
+            _zoomPill.Controls.Add(pillItems[i]);
+            px += pillItems[i].Width + (i == 2 ? pillGap : GAP);
+        }
+        _shell.Controls.Add(_zoomPill);
+        _zoomPill.BringToFront();
+        _tabs.Resize += (s, e) => LayoutZoomPill();
+        LayoutZoomPill();
+
         UpdateToolbarEnabled();
     }
 
-    void LayoutToolbar(int btnH)
+    void LayoutToolbar(int btnH, int openLeft)
     {
         int topV = (_toolbar.Height - btnH) / 2;
         _centerFlow.Location  = new Point((_toolbar.Width - _centerFlow.Width) / 2, topV);
-        _btnOpen.Location     = new Point(16, (_toolbar.Height - _btnOpen.Height) / 2);
+        _btnOpen.Location     = new Point(openLeft, (_toolbar.Height - _btnOpen.Height) / 2);
         _themeSwitch.Location = new Point(_toolbar.Width - 16 - _themeSwitch.Width, (_toolbar.Height - _themeSwitch.Height) / 2);
+    }
+
+    void LayoutZoomPill()
+    {
+        if (_zoomPill == null || _tabs == null || _tabs.Width <= 0) return;
+        _zoomPill.Location = new Point(_tabs.Left + (_tabs.Width - _zoomPill.Width) / 2, _tabs.Bottom - _zoomPill.Height - 12);
     }
 
     // Icon+label buttons must be measured, not guessed — a fixed pixel width truncates
@@ -944,6 +1045,23 @@ public class MinimalPdfReader : Form
         int textW = TextRenderer.MeasureText(b.Text, b.Font, new Size(int.MaxValue, b.Height), TextFormatFlags.SingleLine).Width;
         int iconZone = (b.Icon != null) ? 8 + 22 : 8;
         b.Width = iconZone + textW + 14;
+    }
+
+    // Manual letter-spacing for the brand title — TextRenderer has no tracking option.
+    // Returns the total width drawn (or that would be drawn), for layout purposes.
+    static int DrawTracked(Graphics g, string text, Font font, Rectangle rect, Color color, int trackingPx, bool draw = true)
+    {
+        int x = rect.X;
+        foreach (char ch in text)
+        {
+            string s = ch.ToString();
+            Size sz = TextRenderer.MeasureText(g, s, font, new Size(int.MaxValue, rect.Height), TextFormatFlags.NoPadding | TextFormatFlags.SingleLine);
+            if (draw)
+                TextRenderer.DrawText(g, s, font, new Rectangle(x, rect.Y, sz.Width + trackingPx, rect.Height), color,
+                    TextFormatFlags.NoPadding | TextFormatFlags.VerticalCenter | TextFormatFlags.SingleLine);
+            x += sz.Width + trackingPx;
+        }
+        return x - rect.X;
     }
 
     Label MkLabel(string text, DockStyle dock, int w)
@@ -1048,6 +1166,7 @@ public class MinimalPdfReader : Form
         _statusBar.Invalidate();
         _tabs.ApplyTheme();
         _tabs.BackColor = T.TabBg;
+        _zoomPill.Invalidate();
 
         foreach (Control c in _toolbar.Controls)
         {
@@ -1060,10 +1179,15 @@ public class MinimalPdfReader : Form
                 foreach (Control cc in pnl.Controls)
                 {
                     { FlatBtn b2 = cc as FlatBtn; if (b2 != null) b2.Refresh2(); }
-                    { VSep v2 = cc as VSep; if (v2 != null) v2.Refresh2(); }
                     { Label l2 = cc as Label; if (l2 != null) l2.ForeColor = T.Txt; }
                 }
             }
+        }
+
+        foreach (Control c in _zoomPill.Controls)
+        {
+            { FlatBtn b = c as FlatBtn; if (b != null) b.Refresh2(); }
+            { Label l = c as Label; if (l != null) { l.BackColor = Color.Transparent; l.ForeColor = T.Txt; } }
         }
 
         _lblPage.ForeColor = _lblZoom.ForeColor = T.Txt;
