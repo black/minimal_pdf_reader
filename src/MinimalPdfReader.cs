@@ -205,9 +205,9 @@ public static class Ico
     // "space_dashboard"-style panel/layout glyph — matches the design file's app-mark icon.
     public static void Dashboard(Graphics g, Rectangle r, Color c)
     {
-        float cx = r.X + r.Width / 2f, cy = r.Y + r.Height / 2f, s = 8f;
+        float cx = r.X + r.Width / 2f, cy = r.Y + r.Height / 2f, s = 10.5f;
         var outer = new RectangleF(cx - s, cy - s, s * 2, s * 2);
-        using (var p = new Pen(c, 1.4f) { LineJoin = LineJoin.Round })
+        using (var p = new Pen(c, 1.7f) { LineJoin = LineJoin.Round })
         {
             g.DrawRectangle(p, outer.X, outer.Y, outer.Width, outer.Height);
             float midX = outer.X + outer.Width * 0.55f;
@@ -252,21 +252,21 @@ public static class Ico
     // ── Window caption glyphs ────────────────────────────────────────────
     public static void Minimize(Graphics g, Rectangle r, Color c)
     {
-        float cx = r.X + r.Width / 2f, cy = r.Y + r.Height / 2f, s = 4.5f;
-        using (var p = new Pen(c, 1.2f)) g.DrawLine(p, cx - s, cy, cx + s, cy);
+        float cx = r.X + r.Width / 2f, cy = r.Y + r.Height / 2f, s = 7f;
+        using (var p = new Pen(c, 1.6f)) g.DrawLine(p, cx - s, cy, cx + s, cy);
     }
 
     public static void Maximize(Graphics g, Rectangle r, Color c)
     {
-        float cx = r.X + r.Width / 2f, cy = r.Y + r.Height / 2f, s = 4.2f;
-        using (var p = new Pen(c, 1.2f)) g.DrawRectangle(p, cx - s, cy - s, s * 2, s * 2);
+        float cx = r.X + r.Width / 2f, cy = r.Y + r.Height / 2f, s = 6.5f;
+        using (var p = new Pen(c, 1.6f)) g.DrawRectangle(p, cx - s, cy - s, s * 2, s * 2);
     }
 
     // Two overlapping outline squares — outline-only, so the overlap reads fine with no fill knockout.
     public static void Restore(Graphics g, Rectangle r, Color c)
     {
-        float cx = r.X + r.Width / 2f, cy = r.Y + r.Height / 2f, s = 3.6f, off = 2.2f;
-        using (var p = new Pen(c, 1.2f))
+        float cx = r.X + r.Width / 2f, cy = r.Y + r.Height / 2f, s = 5.6f, off = 3.2f;
+        using (var p = new Pen(c, 1.6f))
         {
             g.DrawRectangle(p, cx - s + off, cy - s - off, s * 2, s * 2);
             g.DrawRectangle(p, cx - s - off, cy - s + off, s * 2, s * 2);
@@ -275,8 +275,8 @@ public static class Ico
 
     public static void Close(Graphics g, Rectangle r, Color c)
     {
-        float cx = r.X + r.Width / 2f, cy = r.Y + r.Height / 2f, s = 4.2f;
-        using (var p = new Pen(c, 1.2f))
+        float cx = r.X + r.Width / 2f, cy = r.Y + r.Height / 2f, s = 6.5f;
+        using (var p = new Pen(c, 1.6f))
         {
             g.DrawLine(p, cx - s, cy - s, cx + s, cy + s);
             g.DrawLine(p, cx + s, cy - s, cx - s, cy + s);
@@ -1030,7 +1030,11 @@ public class MinimalPdfReader : Form
         // Outer margin frame: header-tier background showing around a lighter, rounded
         // content card (toolbar/tabs/canvas/status bar) — matches the design file's
         // two-layer structure (dark chrome frame + inset rounded content panel).
-        _shell = new DoubleBufferedPanel { Dock = DockStyle.Fill, BackColor = T.Bg, Padding = new Padding(10) };
+        // BackColor here also matters beyond the margin fill: the floating zoom pill fakes
+        // transparency by sampling ITS PARENT's background (WinForms has no true see-through
+        // compositing against sibling controls), so this must match the content tier (what's
+        // actually behind the pill — the tab strip/canvas) or the pill shows a mismatched box.
+        _shell = new DoubleBufferedPanel { Dock = DockStyle.Fill, BackColor = T.Bar, Padding = new Padding(10) };
 
         // ── Status bar ───────────────────────────────────────────────────────
         _statusBar = new DoubleBufferedPanel { Dock = DockStyle.Bottom, Height = 28, BackColor = T.Bg };
@@ -1052,11 +1056,11 @@ public class MinimalPdfReader : Form
 
         // ── Title bar — brand mark, Open File, theme toggle, window controls all in one
         // merged row, matching the design file exactly (no separate native caption). ──
-        const int BRAND_ICON = 24, MARGIN = 16, CAP_W = 40, CAP_GAP = 24, ROW_H = 64;
-        _titleBar = new Panel { Dock = DockStyle.Top, Height = ROW_H, BackColor = T.Bg };
+        const int BRAND_ICON = 30, MARGIN = 22, CAP_W = 52, CAP_GAP = 24, ROW_H = 84;
+        _titleBar = new DoubleBufferedPanel { Dock = DockStyle.Top, Height = ROW_H, BackColor = T.Bg };
         Size brandSz = TextRenderer.MeasureText("PDF READER", T.UiFont, new Size(int.MaxValue, ROW_H),
             TextFormatFlags.NoPadding | TextFormatFlags.SingleLine);
-        int brandTextX = MARGIN + BRAND_ICON + 16;
+        int brandTextX = MARGIN + BRAND_ICON + 20;
         _titleBar.Paint += (s, e) => {
             var g = e.Graphics; g.SmoothingMode = SmoothingMode.AntiAlias;
             Ico.Dashboard(g, new Rectangle(MARGIN, (ROW_H - BRAND_ICON) / 2, BRAND_ICON, BRAND_ICON), T.Txt);
@@ -1268,7 +1272,7 @@ public class MinimalPdfReader : Form
         BackColor = T.Bg;
         _themeSwitch.On = !T.Dark;
         _themeSwitch.Invalidate();
-        _shell.BackColor = T.Bg;
+        _shell.BackColor = T.Bar;
         _shell.Invalidate();
         _titleBar.BackColor = T.Bg;
         _titleBar.Invalidate();
