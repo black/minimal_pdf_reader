@@ -521,6 +521,10 @@ public class ChromeTabs : TabControl
                  ControlStyles.AllPaintingInWmPaint, true);
         SizeMode = TabSizeMode.Normal;      // auto-width per tab — flush notebook-tab look, not fixed pills
         Padding = new Point(24, 8);         // per-tab horizontal/vertical padding (native TabControl API)
+        Multiline = true;                   // auto-width tabs have no scroll/overflow handling under full
+                                             // owner-draw — without this, tabs past the strip's edge become
+                                             // invisible and unclickable once several files are open. Wrapping
+                                             // to another row keeps every open tab reachable.
         Font = T.UiBig;
     }
 
